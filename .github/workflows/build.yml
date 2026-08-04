@@ -1,0 +1,100 @@
+name: Build and publish watchlists
+
+# Three triggers:
+#   * push        — a new recommendation arrived (bot.py pushed the ledger)
+#   * schedule    — refresh prices while markets are open
+#   * dispatch    — manual rebuild from the Actions tab
+#
+# Cron is UTC and GitHub does not honour daylight saving, so the windows are
+# deliberately wide enough to cover both CET/CEST and ET/EDT rather than being
+# tuned to the minute. GitHub also queues scheduled jobs under load, so treat
+# these as "about every 20 minutes", not a guarantee.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'data/**'
+      - 'build/**'
+      - 'build_site.py'
+      - '.github/workflows/build.yml'
+  schedule:
+    # Every 20 min, 07:00–21:59 UTC, Mon–Fri.
+    # Covers the European session (07:00–16:30 UTC) and the US session
+    # (13:30–21:00 UTC) across both DST regimes.
+    - cron: '*/20 7-21 * * 1-5'
+    # Post-close snapshot: 21:30 UTC is ~30 min after the US close in either
+    # regime, late enough that Yahoo has settled the official prints.
+    - cron: '30 21 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      snapshot:
+        description: 'Also freeze missing daily closes'
+        type: boolean
+        default: false
+
+concurrency:
+  group: build-watchlists
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # Runs on the post-close cron and on a manual run with the box ticked.
+      # Freezes each finished day's official close so the trader P/L becomes
+      # permanent history instead of drifting with the live price.
+      - name: Snapshot daily closes
+        if: github.event.schedule == '30 21 * * 1-5' || inputs.snapshot
+        run: python3 snapshot_closes.py --db data/recommendations.db
+
+      # No secrets needed. Thesis syntheses are written on Arturo's machine by
+      # the ticker-thesis-summaries scheduled task and arrive inside the ledger;
+      # this step only reads them.
+      - name: Build site
+        run: python3 build_site.py --db data/recommendations.db
+
+      # The snapshot step freezes daily closes into the ledger. Committing that
+      # back means tomorrow's runs reuse it instead of re-fetching, and keeps a
+      # finished day's result permanent. [skip ci] stops this from retriggering
+      # the push workflow in a loop.
+      - name: Commit ledger updates
+        run: |
+          git config user.name  "watchlist-bot"
+          git config user.email "actions@github.com"
+          if ! git diff --quiet -- data/recommendations.db; then
+            git add data/recommendations.db
+            git commit -m "Update ledger: daily closes [skip ci]"
+            git push
+          else
+            echo "No ledger changes to commit"
+          fi
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
