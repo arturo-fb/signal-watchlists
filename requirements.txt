@@ -1,0 +1,4 @@
+# The published build needs prices and nothing else. Thesis syntheses are
+# written by the ticker-thesis-summaries scheduled task on Arturo's machine
+# and travel inside the ledger, so no model SDK and no API key are involved.
+yfinance>=0.2.40
