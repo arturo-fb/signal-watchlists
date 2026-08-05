@@ -63,14 +63,23 @@ def open_ledger(db_path: Path) -> sqlite3.Connection:
 
 
 def load_ledger(db_path: Path) -> tuple[list[dict], dict[str, dict[str, float]]]:
-    """(recommendations, {ticker: {date: close}}). Empty if the DB doesn't exist."""
+    """(recommendations, {ticker: {date: close}}). Empty if the DB doesn't exist
+    or was left mid-write — a file that opens fine but has no tables yet (e.g. an
+    interrupted first write) is treated the same as "no data" rather than failing
+    the whole build. ledger_sync.py already refuses to publish a ledger in this
+    state, but this is a second, independent guard: the build must never go red
+    over a transient source-side write hiccup."""
     if not Path(db_path).exists():
         return [], {}
     conn = open_ledger(db_path)
     try:
-        recs = [dict(r) for r in conn.execute(
-            "SELECT * FROM recommendations ORDER BY profile_id, ticker, id"
-        )]
+        try:
+            recs = [dict(r) for r in conn.execute(
+                "SELECT * FROM recommendations ORDER BY profile_id, ticker, id"
+            )]
+        except sqlite3.OperationalError as e:
+            print(f"[build] ledger has no recommendations table yet ({e}) — treating as empty")
+            recs = []
         closes: dict[str, dict[str, float]] = defaultdict(dict)
         try:
             for r in conn.execute("SELECT ticker, date, close FROM daily_closes"):
