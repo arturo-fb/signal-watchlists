@@ -27,6 +27,7 @@ from datetime import datetime
 from .html_util import (esc, flag, horizon_label, money, page, pct_html,
                         risk_class, stat_pct)
 from .theme import GATE_HTML, GATE_JS, TRADER_CSS, page_css
+from . import render_entry_exit as ree
 
 
 def _pct_span(value, big: bool = False) -> str:
@@ -270,8 +271,10 @@ document.addEventListener('click', function(){
 
 
 def render(view: dict, updated: str, market_open: bool,
-           months: list[str] | None = None, is_archive: bool = False) -> str:
+           months: list[str] | None = None, is_archive: bool = False,
+           ee: dict | None = None) -> str:
     p = view["profile"]
+    ee = None if is_archive else ee
     months = months or [view["month"]]
     # An archive page sits two levels deeper (/role/m/YYYY-MM/), so its links
     # back to the channel and out to ticker pages need to climb further.
@@ -357,6 +360,8 @@ def render(view: dict, updated: str, market_open: bool,
     </div>
     <div class="updated">⏱ Prices as of {esc(updated)}</div>
   </header>
+  {ree.tab_bar(len(ee['open']), ree.alert_count(ee)) if ee else ''}
+  <section class="tabpane" id="pane-recs">
 
   {_month_nav(months, view['month'], is_archive)}
 
@@ -384,6 +389,8 @@ def render(view: dict, updated: str, market_open: bool,
     </div>
     <div class="weeks">{_week_blocks(view['weeks'])}</div>
   </div>
+  </section>
+  {('<section class="tabpane" id="pane-entries" hidden>' + ree.section(ee, p) + '</section>') if ee else ''}
 
   <footer>
     Every recommendation posted to <code>#signals-{esc(p['discord_role'])}</code> ·
@@ -393,6 +400,6 @@ def render(view: dict, updated: str, market_open: bool,
 </div>
 """
     return page(f"{p['name']} — Signal Watchlist",
-                page_css(TRADER_CSS), body,
-                SCRIPT.replace("__TRADING_DAY__", view["today"]),
+                page_css(TRADER_CSS) + (ree.CSS if ee else ""), body,
+                SCRIPT.replace("__TRADING_DAY__", view["today"]) + (ree.SCRIPT if ee else ""),
                 GATE_HTML, GATE_JS, depth=1)

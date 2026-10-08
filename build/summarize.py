@@ -139,9 +139,25 @@ def pending(views: dict, db_path) -> list[dict]:
 
 def store(db_path, profile_id: str, ticker: str, source_hash_value: str,
           summary: str) -> None:
-    """Write one synthesis back to the ledger."""
+    """
+    Write one synthesis back to the ledger.
+
+    journal_mode=PERSIST is deliberate. This function is the one write path
+    that runs from the scheduled task's sandbox, where the project folder is a
+    FUSE mount that refuses unlink(). SQLite's default DELETE journal must
+    remove <db>-journal to finish a commit, so every commit died with
+    "disk I/O error" even though the page writes themselves had succeeded.
+    PERSIST zeroes the journal header in place instead of unlinking it —
+    exactly as crash-safe, but it never calls unlink. The bot writing natively
+    on the Mac is unaffected; journal_mode is per-connection for non-WAL modes.
+
+    The zeroed <db>-journal left behind is inert (SQLite ignores a journal with
+    a zeroed header), and ledger_sync._snapshot_ledger() clears stale sidecars
+    before snapshotting anyway. We still try to remove it, and ignore failure.
+    """
     conn = sqlite3.connect(str(db_path))
     try:
+        conn.execute("PRAGMA journal_mode=PERSIST")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS thesis_summaries (
                 profile_id TEXT NOT NULL, ticker TEXT NOT NULL,
@@ -160,3 +176,7 @@ def store(db_path, profile_id: str, ticker: str, source_hash_value: str,
         conn.commit()
     finally:
         conn.close()
+        try:
+            Path(str(db_path) + "-journal").unlink()
+        except OSError:
+            pass  # mount forbids unlink; the zeroed journal is harmless

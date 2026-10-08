@@ -19,6 +19,7 @@ from __future__ import annotations
 from .html_util import (attr, esc, flag, horizon_label, markdown, money,
                         money_signed, pct_html, page, risk_class, stat_pct)
 from .theme import GATE_HTML, GATE_JS, PASSPHRASE, TICKER_CSS, page_css
+from . import render_entry_exit as ree
 
 
 def _recs_cell(row: dict) -> str:
@@ -366,7 +367,7 @@ sortBy('pnl', 'desc');
 """
 
 
-def render(view: dict, updated: str, max_recs: int) -> str:
+def render(view: dict, updated: str, max_recs: int, ee: dict | None = None) -> str:
     p = view["profile"]
     rows = view["rows"]
 
@@ -403,6 +404,8 @@ def render(view: dict, updated: str, max_recs: int) -> str:
     </div>
     <div class="updated">⏱ Prices as of {esc(updated)}</div>
   </header>
+  {ree.tab_bar(len(ee['open']), ree.alert_count(ee)) if ee else ''}
+  <section class="tabpane" id="pane-recs">
 
   <div class="summary">
     <div class="stat"><div class="lbl">Tickers Tracked</div><div class="val blue">{view['total']}</div></div>
@@ -472,6 +475,8 @@ def render(view: dict, updated: str, max_recs: int) -> str:
       </tbody>
     </table>
   </div>
+  </section>
+  {('<section class="tabpane" id="pane-entries" hidden>' + ree.section(ee, p) + '</section>') if ee else ''}
 
   <footer>
     Every recommendation posted to <code>#signals-{esc(p['discord_role'])}</code> ·
@@ -481,4 +486,5 @@ def render(view: dict, updated: str, max_recs: int) -> str:
 </div>
 """
     return page(f"{p['name']} — Signal Watchlist",
-                page_css(), body, SCRIPT, GATE_HTML, GATE_JS, depth=1)
+                page_css() + (ree.CSS if ee else ""), body,
+                SCRIPT + (ree.SCRIPT if ee else ""), GATE_HTML, GATE_JS, depth=1)

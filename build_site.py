@@ -31,6 +31,7 @@ sys.path.insert(0, str(HERE))
 
 from build import render_investor, render_landing, render_ticker, render_trader  # noqa: E402
 from build import summarize  # noqa: E402
+from build import entry_exit_view  # noqa: E402
 from build.model import (build_profile_view, build_trader_view,  # noqa: E402
                          fetch_market_data, is_day_trading, load_ledger,
                          load_profiles, today_et)
@@ -111,6 +112,14 @@ def main() -> int:
     for r in recs:
         by_profile[r["profile_id"]].append(r)
 
+    # Entries & exits tab — read from the ee_* tables the bot writes. Every
+    # position ticker is also a recommended ticker, so `prices` already has it.
+    ee_data = entry_exit_view.load(db_path)
+    if verbose:
+        n_open = sum(1 for p in ee_data["positions"] if p["status"] == "open")
+        print(f"[build] entries & exits: {len(ee_data['positions'])} positions "
+              f"({n_open} open), {len(ee_data['slow'])} slow ×3")
+
     now = datetime.now(MADRID)
     updated = now.strftime("%b %d, %Y · %H:%M CET")
     today = today_et()
@@ -164,7 +173,8 @@ def main() -> int:
             months = sorted({r["created_date_et"][:7] for r in by_profile.get(pid, [])})
             if not months:
                 months = [trader_views[pid]["month"]]
-            html = render_trader.render(trader_views[pid], updated, is_open, months)
+            html = render_trader.render(trader_views[pid], updated, is_open, months,
+                                        ee=entry_exit_view.build(pid, ee_data, prices))
 
             for m in months[:-1]:
                 arch = build_trader_view(profile, by_profile.get(pid, []),
@@ -175,7 +185,8 @@ def main() -> int:
                 n_pages += 1
         else:
             max_recs = max((r["rec_count"] for r in view["rows"]), default=1)
-            html = render_investor.render(view, updated, max_recs)
+            html = render_investor.render(view, updated, max_recs,
+                                          ee=entry_exit_view.build(pid, ee_data, prices))
         write(DOCS / role / "index.html", html)
         n_pages += 1
 
