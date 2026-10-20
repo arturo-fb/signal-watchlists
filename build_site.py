@@ -6,11 +6,13 @@ build_site.py — Build the whole site into docs/.
     python3 build_site.py --no-prices      # skip yfinance (fast local preview)
     python3 build_site.py --no-summaries   # skip the Anthropic calls
 
-Output layout (GitHub Pages serves docs/ as the site root):
+Output layout (GitHub Pages serves docs/ as the site root). Since 2026-10-20
+the site is ONE board — the Signals profile (ID P05) — at the root:
 
-    docs/index.html                    landing page
-    docs/<role>/index.html             that channel's watchlist
-    docs/<role>/<TICKER>/index.html    ticker detail page
+    docs/index.html                    Signals board: hero + Watchlist / Entries & exits tabs
+    docs/<TICKER>/index.html           ticker detail page
+    docs/<old-role>/...                redirects from the ten-profile layout, so old
+                                       links (e.g. /aggressive/, /aggressive/NVDA/) still work
 
 Ticker directories replace "." with "-" so SAN.MC becomes /SAN-MC/ — a dot in a
 path segment makes some static hosts treat it as a file extension.
@@ -29,7 +31,7 @@ from zoneinfo import ZoneInfo
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from build import render_investor, render_landing, render_ticker, render_trader  # noqa: E402
+from build import render_investor, render_ticker  # noqa: E402
 from build import summarize  # noqa: E402
 from build import entry_exit_view  # noqa: E402
 from build.model import (build_profile_view, build_trader_view,  # noqa: E402
@@ -72,6 +74,24 @@ def market_is_open() -> bool:
     return us or eu
 
 
+# discord_role of every profile in the old ten-profile layout.
+OLD_ROLES = ["conservative-lt", "dividends", "index-etf", "growth", "aggressive",
+             "europe-value", "balanced", "swing", "trader", "thematic"]
+
+
+def _redirect(target: str) -> str:
+    return f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/>
+<meta name="robots" content="noindex,nofollow"/>
+<meta http-equiv="refresh" content="0; url={target}"/>
+<title>Moved — Signals</title>
+<script>location.replace({target!r} + location.hash);</script>
+</head><body style="background:#0f1117;color:#9aa4b2;font-family:system-ui,sans-serif">
+<p>This watchlist moved. <a href="{target}" style="color:#4f8ef7">Go to Signals →</a></p>
+</body></html>
+"""
+
+
 def write(path: Path, html: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(html, encoding="utf-8")
@@ -95,6 +115,9 @@ def main() -> int:
     profiles = load_profiles(profiles_path)
     profiles_by_id = {p["id"]: p for p in profiles}
     recs, closes = load_ledger(db_path)
+    # Only publish profiles that still exist (old P08/P09 rows stay in the
+    # ledger untouched, they just aren't shown).
+    recs = [r for r in recs if r["profile_id"] in profiles_by_id]
 
     if verbose:
         print(f"[build] ledger: {db_path}")
@@ -160,60 +183,45 @@ def main() -> int:
     DOCS.mkdir(parents=True)
     (DOCS / ".nojekyll").write_text("")  # stop Pages running Jekyll over docs/
 
-    n_pages = 0
-    for profile in profiles:
-        pid = profile["id"]
-        role = profile["discord_role"]
-        view = investor_views[pid]
-        trader = is_day_trading(profile)
+    # One board. profiles.json holds a single profile since 2026-10-20; if it
+    # ever holds more, only the first is published.
+    profile = profiles[0]
+    pid = profile["id"]
+    view = investor_views[pid]
+    ee = entry_exit_view.build(pid, ee_data, prices)
+    st = ee["stats"]
+    hero = {
+        "avg": st["avg"],            # closed trades only, equal-weight
+        "win": st["win"],
+        "closed": st["n"],
+        "open": len(ee["open"]),
+        "recs": view["total_recs"],
+        "tickers": view["total"],
+    }
+    max_recs = max((r["rec_count"] for r in view["rows"]), default=1)
+    write(DOCS / "index.html",
+          render_investor.render(view, updated, max_recs, ee=ee, hero=hero))
+    n_pages = 1
 
-        if trader:
-            # Current month at /<role>/, every earlier month archived at
-            # /<role>/m/<YYYY-MM>/ so a month's track record survives the 1st.
-            months = sorted({r["created_date_et"][:7] for r in by_profile.get(pid, [])})
-            if not months:
-                months = [trader_views[pid]["month"]]
-            html = render_trader.render(trader_views[pid], updated, is_open, months,
-                                        ee=entry_exit_view.build(pid, ee_data, prices))
-
-            for m in months[:-1]:
-                arch = build_trader_view(profile, by_profile.get(pid, []),
-                                         prices, closes, today, month=m)
-                write(DOCS / role / "m" / m / "index.html",
-                      render_trader.render(arch, updated, is_open, months,
-                                           is_archive=True))
-                n_pages += 1
-        else:
-            max_recs = max((r["rec_count"] for r in view["rows"]), default=1)
-            html = render_investor.render(view, updated, max_recs,
-                                          ee=entry_exit_view.build(pid, ee_data, prices))
-        write(DOCS / role / "index.html", html)
+    slugs = []
+    for row in view["rows"]:
+        slug = row["ticker"].replace(".", "-")
+        slugs.append(slug)
+        write(DOCS / slug / "index.html",
+              render_ticker.render(row, profile, updated,
+                                   summaries.get((pid, row["ticker"])), False, depth=1))
         n_pages += 1
 
-        for row in view["rows"]:
-            slug = row["ticker"].replace(".", "-")
-            html = render_ticker.render(
-                row, profile, updated,
-                summaries.get((pid, row["ticker"])), trader)
-            write(DOCS / role / slug / "index.html", html)
-            n_pages += 1
+    # Old ten-profile URLs → the new layout (hash kept, so /aggressive/#entries
+    # lands on the Entries & exits tab).
+    for role in OLD_ROLES:
+        write(DOCS / role / "index.html", _redirect("../"))
+    for slug in slugs:
+        write(DOCS / "aggressive" / slug / "index.html", _redirect(f"../../{slug}/"))
 
-        if verbose:
-            kind = "trader" if trader else "investor"
-            print(f"[build]   /{role}/  {view['total']} tickers · {kind}")
-
-    all_pnls = [r["pnl_pct"] for v in investor_views.values()
-                for r in v["rows"] if r["pnl_pct"] is not None]
-    totals = {
-        "profiles": len(profiles),
-        "tickers": sum(v["total"] for v in investor_views.values()),
-        "recs": len(recs),
-        "avg_pnl": round(sum(all_pnls) / len(all_pnls), 2) if all_pnls else None,
-    }
-
-    write(DOCS / "index.html",
-          render_landing.render(profiles, card_views, updated, totals, is_day_trading))
-    n_pages += 1
+    if verbose:
+        print(f"[build]   /  Signals board · {view['total']} tickers · "
+              f"{st['n']} closed trades · {len(ee['open'])} open")
 
     if verbose:
         print(f"[build] wrote {n_pages} pages to {DOCS}")

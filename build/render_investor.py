@@ -1,6 +1,7 @@
 """
-render_investor.py — The watchlist page for the eight investing profiles
-(P01–P07, P10).
+render_investor.py — The Signals board (the site's home page since 2026-10-20,
+when the ten profiles were collapsed into one). It can still render a plain
+profile page, which is what it did for the eight investing profiles before.
 
 Same layout as the watchlist you already use — entry price, live price, P&L,
 and the Recs badge with its hover breakdown — with two additions:
@@ -18,7 +19,7 @@ from __future__ import annotations
 
 from .html_util import (attr, esc, flag, horizon_label, markdown, money,
                         money_signed, pct_html, page, risk_class, stat_pct)
-from .theme import GATE_HTML, GATE_JS, PASSPHRASE, TICKER_CSS, page_css
+from .theme import GATE_HTML, GATE_JS, LANDING_CSS, PASSPHRASE, TICKER_CSS, page_css
 from . import render_entry_exit as ree
 
 
@@ -367,9 +368,53 @@ sortBy('pnl', 'desc');
 """
 
 
-def render(view: dict, updated: str, max_recs: int, ee: dict | None = None) -> str:
+def channel_name(p: dict) -> str:
+    """The Discord channel this board mirrors (#signals since 2026-10-20)."""
+    return p.get("discord_channel") or f"signals-{p['discord_role']}"
+
+
+def _hero(h: dict, updated: str) -> str:
+    """Home-page hero. Every number here comes from build_site.py; the P&L is
+    the closed-trade average from the Entries & exits tab, not the watchlist."""
+    win = "—" if h.get("win") is None else f"{h['win']}%"
+    return f"""
+<section class="hero hero-compact">
+  <div class="hero-badge">● Live · updated automatically</div>
+  <h1><span class="grad">Signals.</span></h1>
+  <p class="lede">
+    Every momentum signal posted to the Discord server, tracked from the price
+    it fired at. The <b>Entries &amp; exits</b> tab holds the actionable trades —
+    the average P&amp;L below is measured only on those closed trades.
+  </p>
+  <div class="hero-stats">
+    <div><div class="hs-val">{stat_pct(h.get('avg'))}</div><div class="hs-lbl">Avg P&amp;L · closed trades</div></div>
+    <div><div class="hs-val">{win}</div><div class="hs-lbl">Win rate</div></div>
+    <div><div class="hs-val blue">{h.get('closed', 0)}</div><div class="hs-lbl">Trades closed</div></div>
+    <div><div class="hs-val">{h.get('open', 0)}</div><div class="hs-lbl">Open positions</div></div>
+    <div><div class="hs-val">{h.get('recs', 0)}</div><div class="hs-lbl">Recommendations</div></div>
+    <div><div class="hs-val">{h.get('tickers', 0)}</div><div class="hs-lbl">Tickers tracked</div></div>
+  </div>
+  <div class="updated">⏱ Prices as of {esc(updated)}</div>
+</section>"""
+
+
+HERO_CSS = """
+.hero.hero-compact{min-height:auto;padding:56px 20px 30px}
+.hero.hero-compact h1{margin-bottom:16px}
+.hero.hero-compact .lede{margin-bottom:28px}
+.hero.hero-compact .hero-stats{gap:30px;margin-bottom:18px}
+.hero.hero-compact .lede b{color:var(--text);font-weight:600}
+@media (max-width:600px){.hero.hero-compact .hero-stats{gap:18px 26px}}
+"""
+
+
+def render(view: dict, updated: str, max_recs: int, ee: dict | None = None,
+           hero: dict | None = None) -> str:
+    """hero=None renders a profile page one level deep (/<role>/); a hero dict
+    renders the home page at the site root."""
     p = view["profile"]
     rows = view["rows"]
+    chan = channel_name(p)
 
     all_dates = sorted({d for r in rows for d in r["rec_dates"]})
     min_date = all_dates[0] if all_dates else ""
@@ -385,17 +430,13 @@ def render(view: dict, updated: str, max_recs: int, ee: dict | None = None) -> s
                      'They appear here automatically as they are posted to Discord.'
                      '</td></tr>')
 
-    body = f"""
-<div id="recs-tooltip"></div>
-<div class="wrap">
-  <a class="backlink" href="../">← All channels</a>
-  <header>
+    header_html = "" if hero else f"""<header>
     <div>
       <h1>{esc(p['name'])}</h1>
       <p>{esc(p['description'])}</p>
       <div class="chips">
         <span class="chip">{esc(p['id'])}</span>
-        <span class="chip">#signals-{esc(p['discord_role'])}</span>
+        <span class="chip">#{esc(chan)}</span>
         <span class="chip {risk_class(p['risk_tolerance'])}">Risk {p['risk_tolerance']}/10</span>
         <span class="chip">{esc(horizon_label(p['investment_horizon_months']))}</span>
         <span class="chip">{' · '.join('🇪🇺 Europe' if r == 'europe' else '🇺🇸 US' for r in p['regions'])}</span>
@@ -403,14 +444,21 @@ def render(view: dict, updated: str, max_recs: int, ee: dict | None = None) -> s
       </div>
     </div>
     <div class="updated">⏱ Prices as of {esc(updated)}</div>
-  </header>
+  </header>"""
+
+    body = f"""
+<div id="recs-tooltip"></div>
+{_hero(hero, updated) if hero else ''}
+<div class="wrap">
+  {'' if hero else '<a class="backlink" href="../">← All channels</a>'}
+  {header_html}
   {ree.tab_bar(len(ee['open']), ree.alert_count(ee)) if ee else ''}
   <section class="tabpane" id="pane-recs">
 
   <div class="summary">
     <div class="stat"><div class="lbl">Tickers Tracked</div><div class="val blue">{view['total']}</div></div>
     <div class="stat"><div class="lbl">Total Recs</div><div class="val">{view['total_recs']}</div></div>
-    <div class="stat"><div class="lbl">Avg P&amp;L</div><div class="val">{stat_pct(view['avg_pnl'])}</div></div>
+    <div class="stat"><div class="lbl">Avg P&amp;L · all recs</div><div class="val">{stat_pct(view['avg_pnl'])}</div></div>
     <div class="stat"><div class="lbl">Winners</div><div class="val green">{view['winners']} / {view['measured']}</div></div>
     <div class="stat"><div class="lbl">Losers</div><div class="val red">{view['losers']} / {view['measured']}</div></div>
   </div>
@@ -479,12 +527,15 @@ def render(view: dict, updated: str, max_recs: int, ee: dict | None = None) -> s
   {('<section class="tabpane" id="pane-entries" hidden>' + ree.section(ee, p) + '</section>') if ee else ''}
 
   <footer>
-    Every recommendation posted to <code>#signals-{esc(p['discord_role'])}</code> ·
+    Every recommendation posted to <code>#{esc(chan)}</code> ·
     Prices via Yahoo Finance · Entry prices captured live at the moment of recommendation
     <div class="disclaimer">This is not professional financial advice — always make your own decisions.</div>
   </footer>
 </div>
 """
-    return page(f"{p['name']} — Signal Watchlist",
-                page_css() + (ree.CSS if ee else ""), body,
-                SCRIPT + (ree.SCRIPT if ee else ""), GATE_HTML, GATE_JS, depth=1)
+    css = page_css() + (ree.CSS if ee else "")
+    if hero:
+        css += LANDING_CSS + HERO_CSS
+    return page("Signals — Watchlist" if hero else f"{p['name']} — Signal Watchlist",
+                css, body, SCRIPT + (ree.SCRIPT if ee else ""), GATE_HTML, GATE_JS,
+                depth=0 if hero else 1)

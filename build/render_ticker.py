@@ -145,7 +145,9 @@ def _thesis_panel(row: dict, summary: str | None) -> str:
 
 
 def render(row: dict, profile: dict, updated: str, summary: str | None,
-           is_trader: bool) -> str:
+           is_trader: bool, depth: int = 2) -> str:
+    """depth=1 for ticker pages at the site root (/<TICKER>/, the single-board
+    layout since 2026-10-20); depth=2 for the old /<role>/<TICKER>/ layout."""
     ccy = row["currency"]
     cur = row["current"]
     chg = row["day_chg"]
@@ -175,7 +177,7 @@ def render(row: dict, profile: dict, updated: str, summary: str | None,
         {f'<span class="chip">{esc(row["sector"])}</span>' if row['sector'] else ''}
         {f'<span class="chip">{esc(row["exchange"])}</span>' if row['exchange'] else ''}
         <span class="chip">{esc(ccy)}</span>
-        <span class="chip">#signals-{esc(profile['discord_role'])}</span>
+        <span class="chip">#{esc(profile.get('discord_channel') or 'signals-' + profile['discord_role'])}</span>
       </div>
     </div>
     <div class="tk-price">
@@ -201,7 +203,7 @@ def render(row: dict, profile: dict, updated: str, summary: str | None,
       <h2>🔁 All recommendations</h2>
       <span class="src-tag">P&amp;L measured against the current price</span>
     </div>
-    {_all_recs_table(row)}
+    <div style="overflow-x:auto">{_all_recs_table(row)}</div>
   </div>
 
   {'<div class="panel"><div class="panel-head"><h2>🗒️ Every thesis, in order</h2>'
@@ -215,4 +217,4 @@ def render(row: dict, profile: dict, updated: str, summary: str | None,
 </div>
 """
     return page(f"{row['ticker']} — {profile['name']}",
-                page_css(TICKER_CSS), body, "", GATE_HTML, GATE_JS, depth=2)
+                page_css(TICKER_CSS), body, "", GATE_HTML, GATE_JS, depth=depth)

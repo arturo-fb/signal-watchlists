@@ -57,6 +57,13 @@ details.ee-more{margin-top:18px}
 details.ee-more summary{cursor:pointer;color:var(--sub);font-size:.8rem;padding:6px 0}
 details.ee-more summary:hover{color:var(--text)}
 .ee-note{font-size:.74rem;color:var(--muted);margin-top:12px}
+.ee-range input[type=date]{background:var(--surface);border:1px solid var(--border);color:var(--text);
+  border-radius:7px;padding:5px 8px;font:inherit;font-size:.78rem;color-scheme:dark}
+.ee-range label{display:inline-flex;align-items:center;gap:6px}
+.ee-range-note{font-size:.76rem;color:var(--sub);background:rgba(79,142,247,.07);
+  border:1px solid rgba(79,142,247,.25);border-radius:9px;padding:8px 12px;margin:-4px 0 14px}
+.ee-range-note b{color:var(--text)}
+@media (max-width:600px){.ee-range .seg{flex-wrap:wrap}}
 """
 
 SCRIPT = r"""
@@ -86,15 +93,73 @@ function eeMarket(m){
 }
 function _fmt(v, d){ return (v > 0 ? '+' : '') + v.toFixed(d === undefined ? 2 : d) + '%'; }
 function _cls(v){ return v > 0 ? 'green' : (v < 0 ? 'red' : 'blue'); }
+// ── "Closed between" date range ─────────────────────────────────────────────
+// A trade counts when its EXIT date falls inside [from, to], whenever it was
+// entered. Open positions aren't closed, so they're hidden while a range is set.
+var EE_RANGE_KEY = 'ee-range-v1';
+function _iso(d){
+  var m = d.getMonth() + 1, day = d.getDate();
+  return d.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+}
+function _eeRange(){
+  var f = document.getElementById('ee-from'), t = document.getElementById('ee-to');
+  return {from: f ? f.value : '', to: t ? t.value : ''};
+}
+function _eeMarkPreset(p){
+  document.querySelectorAll('#ee-preset button').forEach(function(b){
+    b.classList.toggle('active', b.dataset.p === p);
+  });
+}
+function _eeSave(p){
+  try { sessionStorage.setItem(EE_RANGE_KEY, JSON.stringify({p: p, r: _eeRange()})); } catch(e){}
+}
+function eePreset(p){
+  var now = new Date(), from = '', to = '';
+  if (p === 'week'){
+    var d = new Date(now); var wd = (d.getDay() + 6) % 7; d.setDate(d.getDate() - wd);
+    from = _iso(d); to = _iso(now);
+  } else if (p === 'month'){
+    from = _iso(new Date(now.getFullYear(), now.getMonth(), 1)); to = _iso(now);
+  } else if (p === '30d'){
+    var d30 = new Date(now); d30.setDate(d30.getDate() - 29);
+    from = _iso(d30); to = _iso(now);
+  } else if (p === 'ytd'){
+    from = _iso(new Date(now.getFullYear(), 0, 1)); to = _iso(now);
+  }
+  document.getElementById('ee-from').value = from;
+  document.getElementById('ee-to').value = to;
+  _eeMarkPreset(p);
+  _eeSave(p);
+  eeApply();
+}
+function eeRangeChanged(){
+  var r = _eeRange();
+  _eeMarkPreset(r.from || r.to ? '' : 'all');
+  _eeSave(r.from || r.to ? 'custom' : 'all');
+  eeApply();
+}
+function _eeFmtDate(s){
+  if (!s) return '';
+  var d = new Date(s + 'T12:00:00');
+  return d.toLocaleDateString(undefined, {month: 'short', day: 'numeric', year: 'numeric'});
+}
+
 function eeApply(){
   var sec = document.getElementById('ee-sector');
   sec = sec ? sec.value : '';
+  var rg = _eeRange(), ranged = !!(rg.from || rg.to);
+  var wrap = document.getElementById('ee-open-wrap');
+  if (wrap) wrap.hidden = ranged;
   ['ee-open','ee-closed','ee-skipped','ee-slow'].forEach(function(id){
     var body = document.getElementById(id);
     if (!body) return;
     var shown = 0;
     body.querySelectorAll('tr[data-mkt]').forEach(function(r){
       var ok = (EE_MKT === 'all' || r.dataset.mkt === EE_MKT) && (!sec || r.dataset.sector === sec);
+      if (ok && ranged && id === 'ee-closed'){
+        var x = r.dataset.exit || '';
+        ok = !!x && (!rg.from || x >= rg.from) && (!rg.to || x <= rg.to);
+      }
       r.style.display = ok ? '' : 'none';
       if (ok) shown++;
     });
@@ -127,10 +192,31 @@ function eeApply(){
     if (r.style.display === 'none') return;
     var v = parseFloat(r.dataset.unreal); if (!isNaN(v)) unr.push(v);
   });
-  set('st-open', unr.length ? unr.length + ' · <span class="' + _cls(avg(unr)) + '">' + _fmt(avg(unr)) + '</span>'
-                            : document.querySelectorAll('#ee-open tr[data-mkt]').length ? '—' : '0');
+  set('st-open', ranged ? '<span title="Open positions are hidden while a date range is set">—</span>'
+                : unr.length ? unr.length + ' · <span class="' + _cls(avg(unr)) + '">' + _fmt(avg(unr)) + '</span>'
+                : document.querySelectorAll('#ee-open tr[data-mkt]').length ? '—' : '0');
+  var note = document.getElementById('ee-range-note');
+  if (note){
+    note.hidden = !ranged;
+    if (ranged){
+      var span = (rg.from ? _eeFmtDate(rg.from) : 'the start') + ' – ' + (rg.to ? _eeFmtDate(rg.to) : 'today');
+      note.innerHTML = '<b>' + rets.length + '</b> trade' + (rets.length === 1 ? '' : 's') +
+        ' closed between <b>' + span + '</b>. Stats above are for these trades only; open positions are hidden.';
+    }
+  }
 }
-if (document.getElementById('ee-open')) eeApply();
+(function(){
+  if (!document.getElementById('ee-open')) return;
+  var saved = null;
+  try { saved = JSON.parse(sessionStorage.getItem(EE_RANGE_KEY) || 'null'); } catch(e){}
+  if (saved && saved.p && saved.p !== 'all' && saved.p !== 'custom'){ eePreset(saved.p); return; }
+  if (saved && saved.p === 'custom' && saved.r){
+    document.getElementById('ee-from').value = saved.r.from || '';
+    document.getElementById('ee-to').value = saved.r.to || '';
+    _eeMarkPreset('');
+  }
+  eeApply();
+})();
 """
 
 
@@ -237,7 +323,8 @@ def _closed_row(r: dict) -> str:
                   if v is not None]
     bench_title = "Benchmark over the same dates: " + ", ".join(bench_bits) if bench_bits else ""
     return f"""
-    <tr {_row_attrs(r, ret=r.get('ret'), excess=r.get('excess'), days=r.get('days_held'))}>
+    <tr {_row_attrs(r, ret=r.get('ret'), excess=r.get('excess'), days=r.get('days_held'),
+                    exit=(r.get('exit_date') or '')[:10])}>
       <td>{_ticker_cell(r)}</td>
       <td><span class="price-main">{money(r['entry_price'], ccy)}</span>
           <div class="price-sub">{_d(r['entry_date'])}</div></td>
@@ -291,7 +378,7 @@ def tab_bar(n_open: int, n_alert: int) -> str:
     hot = " hot" if n_alert else ""
     return f"""
   <div class="tabs" role="tablist">
-    <button class="tab active" data-tab="recs" role="tab">📋 Recommendations</button>
+    <button class="tab active" data-tab="recs" role="tab">📋 Watchlist</button>
     <button class="tab" data-tab="entries" role="tab">🎯 Entries &amp; exits
       <span class="count{hot}" title="open positions">{n_open} open</span></button>
   </div>"""
@@ -320,6 +407,20 @@ def section(ee: dict, profile: dict) -> str:
     <select id="ee-sector" onchange="eeApply()"><option value="">All sectors</option>{sector_opts}</select>
   </div>
 
+  <div class="filter-bar ee-range">
+    <span>Closed between:</span>
+    <label>From <input type="date" id="ee-from" onchange="eeRangeChanged()"></label>
+    <label>To <input type="date" id="ee-to" onchange="eeRangeChanged()"></label>
+    <div class="seg" id="ee-preset">
+      <button data-p="week" onclick="eePreset('week')">This week</button>
+      <button data-p="month" onclick="eePreset('month')">This month</button>
+      <button data-p="30d" onclick="eePreset('30d')">Last 30 days</button>
+      <button data-p="ytd" onclick="eePreset('ytd')">YTD</button>
+      <button data-p="all" class="active" onclick="eePreset('all')">All</button>
+    </div>
+  </div>
+  <div class="ee-range-note" id="ee-range-note" hidden></div>
+
   <div class="summary">
     <div class="stat"><div class="lbl">Closed trades</div><div class="val blue" id="st-n">{st['n']}</div></div>
     <div class="stat"><div class="lbl">Avg return / trade</div><div class="val" id="st-avg">{stat_pct(st['avg'])}</div></div>
@@ -330,10 +431,12 @@ def section(ee: dict, profile: dict) -> str:
     <div class="stat"><div class="lbl">Open · unrealized</div><div class="val" id="st-open">{len(ee['open'])}</div></div>
   </div>
 
+  <div id="ee-open-wrap">
   <div class="ee-h">Open positions <span class="n" id="ee-open-n">{len(ee['open'])}</span>
     <span class="hint">Countdowns are in trading days and refresh with every site build.</span></div>
   {_table('ee-open', ['Ticker', 'Entry', 'Now', 'Countdown', 'Quiet scan days', 'Stop', 'Warnings'],
           open_html, 'No open positions. A new one opens automatically the moment a stock qualifies.')}
+  </div>
 
   <div class="ee-h">Closed trades <span class="n" id="ee-closed-n">{len(ee['closed'])}</span>
     <span class="hint">Your actual exits. Hover “vs market” for both benchmarks.</span></div>
@@ -350,7 +453,7 @@ def section(ee: dict, profile: dict) -> str:
             'None yet. Tracked here so the slow-×3 filter can be rechecked as data comes in.')}
   </details>
   <p class="ee-note">Mark trades from the Discord alert (Sold / Skip / Still holding) or with /sold, /skip, /positions.
-    This page updates within a few minutes. Tracking started fresh on go-live; the Recommendations tab keeps the full history.</p>
+    This page updates within a few minutes. Tracking started fresh on go-live; the Watchlist tab keeps the full history.</p>
 """
 
 

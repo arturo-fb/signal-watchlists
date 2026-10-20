@@ -1,6 +1,6 @@
 # Signal Watchlists
 
-Per-channel investment watchlists for the Discord group. Ten profiles, ten boards, each tracking every recommendation from the price it fired at.
+The Signals watchlist for the Discord group: one board that tracks every momentum signal from the price it fired at, plus an Entries & exits tab with the actionable trades. (Until 2026-10-20 the site had ten per-profile boards; their old links redirect here.)
 
 Published with GitHub Pages. The pages are passphrase-gated — ask Arturo.
 
