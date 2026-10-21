@@ -1,9 +1,11 @@
 """
 render_entry_exit.py — The "Entries & exits" tab on every profile page.
 
-The page is static (GitHub Pages), so nothing here can write: Skip and Sold
-are pressed on the Discord alert (or /sold, /skip), the bot records it, and
-the next build — within a few minutes — shows it here.
+The page is static (GitHub Pages), so nothing here can write. Since 2026-10-20
+the bot closes every position by the rules (the official close of the sell day,
+or the −15% stop); the next build — within a few minutes — shows it here.
+Members' own Sold / Skip / Still holding decisions are personal (Discord
+/positions) and never change this page.
 """
 
 from __future__ import annotations
@@ -398,7 +400,7 @@ def section(ee: dict, profile: dict) -> str:
     <b>Entry</b> when a stock gets its 3rd rec within 3 scan days of the 2nd (the count restarts after 10 quiet scan days) ·
     <b>Exit</b> at the close of trading day 5 (Europe: day 3) · <b>−15%</b> disaster stop, no tight or trailing stops ·
     <b>Flag</b> anything held past the sell day once it goes 4 scan days with no new rec.
-    Performance counts only trades marked <b>Sold</b> in Discord, equal-weighted, from entry to your exit price.
+    Performance counts the plan's closed trades, equal-weighted, from the entry price to the plan's exit: the official close of the sell day, or the −15% stop. Positions close automatically. (The first few trades, before 20 Oct 2026, were closed by hand at the owner's own fills.)
   </div>
 
   <div class="filter-bar">
@@ -439,9 +441,9 @@ def section(ee: dict, profile: dict) -> str:
   </div>
 
   <div class="ee-h">Closed trades <span class="n" id="ee-closed-n">{len(ee['closed'])}</span>
-    <span class="hint">Your actual exits. Hover “vs market” for both benchmarks.</span></div>
+    <span class="hint">The plan's exits. Hover “vs market” for both benchmarks.</span></div>
   {_table('ee-closed', ['Ticker', 'Entry', 'Exit', 'Return', 'Days held', 'Timing', 'vs market'],
-          closed_html, 'No closed trades yet. Press Sold on a Discord alert and it lands here.')}
+          closed_html, 'No closed trades yet. Positions are sold automatically at the sell-day close and land here.')}
 
   <details class="ee-more">
     <summary>Skipped signals (<span id="ee-skipped-n">{len(ee['skipped'])}</span>) — not taken, excluded from performance</summary>
@@ -452,7 +454,7 @@ def section(ee: dict, profile: dict) -> str:
     {_table('ee-slow', ['Ticker', 'Recs', '×2 → ×3', 'Since'], slow_html,
             'None yet. Tracked here so the slow-×3 filter can be rechecked as data comes in.')}
   </details>
-  <p class="ee-note">Mark trades from the Discord alert (Sold / Skip / Still holding) or with /sold, /skip, /positions.
+  <p class="ee-note">Positions open and close automatically. In Discord, members can press Sold / Skip / Still holding (or use /sold, /skip) to track their own decisions; they see their own results with /positions, and none of that changes this page.
     This page updates within a few minutes. Tracking started fresh on go-live; the Watchlist tab keeps the full history.</p>
 """
 

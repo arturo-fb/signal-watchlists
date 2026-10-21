@@ -5,10 +5,12 @@ Reads the ee_* tables the Discord bot writes (entry_exit/store.py) — read
 only, like the rest of the build. If the tables aren't there yet (bot not
 restarted since the feature shipped) every profile simply gets an empty tab.
 
-Performance here is ACTIONABLE performance: only positions you marked Sold
-count, each trade equal-weighted, measured from the entry price to the exit
-price you entered. Nothing is closed automatically at day 5 — an open
-position stays open (and unrealized) until you press Sold.
+Performance here is the PLAN's performance: each closed trade is equal-weighted,
+measured from the entry price to the plan's exit. Since 2026-10-20 the bot
+closes positions itself (official close of the sell-by day, or the −15% stop;
+exit_source = auto_close / auto_stop). Earlier closes were the owner's own
+fills (exit_source = manual). Members' personal decisions are not stored in
+the ledger and never reach this page.
 """
 
 from __future__ import annotations
